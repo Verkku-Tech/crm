@@ -4,6 +4,7 @@ using CRM.Api.Models;
 using CRM.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using System.Text.Json;
 
 namespace CRM.Api.Controllers;
@@ -86,6 +87,12 @@ public class InstagramWebhookController : ControllerBase
                     foreach (var change in entry.Changes)
                     {
                         _logger.LogInformation("Received change event: {Field}", change.Field);
+                        
+                        // Process messages from changes
+                        if (change.Field == "messages" && change.Value != null)
+                        {
+                            await ProcessMessageFromChange(change.Value);
+                        }
                         // Handle other types of changes (comments, mentions, etc.)
                     }
                 }
@@ -189,6 +196,115 @@ public class InstagramWebhookController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing message");
+        }
+    }
+
+    /// <summary>
+    /// Procesa mensajes que vienen en el formato changes (field = "messages")
+    /// </summary>
+    private async Task ProcessMessageFromChange(object changeValue)
+    {
+        try
+        {
+            // Deserializar el valor del change
+            var changeValueJson = JsonSerializer.Serialize(changeValue);
+            var messageChange = JsonSerializer.Deserialize<InstagramMessageChangeValue>(
+                changeValueJson, 
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (messageChange == null || messageChange.Message == null)
+            {
+                _logger.LogWarning("Invalid message change value structure");
+                return;
+            }
+
+            // Convertir el timestamp (puede venir como string o número)
+            long timestampLong;
+            if (long.TryParse(messageChange.Timestamp, out var parsedTimestamp))
+            {
+                timestampLong = parsedTimestamp;
+            }
+            else if (messageChange.Timestamp.All(char.IsDigit) && messageChange.Timestamp.Length > 0)
+            {
+                timestampLong = long.Parse(messageChange.Timestamp);
+            }
+            else
+            {
+                _logger.LogWarning("Invalid timestamp format: {Timestamp}", messageChange.Timestamp);
+                timestampLong = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+
+            var senderId = messageChange.Sender.Id;
+            var messageId = messageChange.Message.Mid;
+            var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(timestampLong).UtcDateTime;
+
+            // Check if message already exists
+            var existingMessage = await _context.Messages
+                .FirstOrDefaultAsync(m => m.PlatformMessageId == messageId);
+
+            if (existingMessage != null)
+            {
+                _logger.LogInformation("Message already exists: {MessageId}", messageId);
+                return;
+            }
+
+            // Get or create contact
+            var contact = await GetOrCreateContact(senderId);
+
+            // Get or create conversation
+            var conversation = await GetOrCreateConversation(contact, senderId);
+
+            // Determine message content and type
+            string content = messageChange.Message.Text ?? string.Empty;
+            string messageType = "Text";
+            string? mediaUrl = null;
+
+            if (messageChange.Message.Attachments != null && messageChange.Message.Attachments.Any())
+            {
+                var attachment = messageChange.Message.Attachments.First();
+                messageType = attachment.Type switch
+                {
+                    "image" => "Image",
+                    "video" => "Video",
+                    "audio" => "Audio",
+                    _ => "File"
+                };
+                mediaUrl = attachment.Payload.Url;
+                content = $"[{messageType} attachment]";
+            }
+
+            // Create message record
+            var message = new Message
+            {
+                ConversationId = conversation.Id,
+                PlatformMessageId = messageId,
+                Platform = "Instagram",
+                Content = content,
+                MessageType = messageType,
+                Direction = "Inbound",
+                Timestamp = timestamp,
+                IsRead = false,
+                MediaUrl = mediaUrl,
+                Metadata = changeValueJson
+            };
+
+            _context.Messages.Add(message);
+
+            // Update conversation
+            conversation.LastMessageAt = timestamp;
+            conversation.UnreadCount++;
+
+            // Update contact
+            contact.LastContactedAt = timestamp;
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Message from change saved successfully. Contact: {ContactId}, Conversation: {ConversationId}, MessageId: {MessageId}",
+                contact.Id, conversation.Id, messageId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing message from change");
         }
     }
 

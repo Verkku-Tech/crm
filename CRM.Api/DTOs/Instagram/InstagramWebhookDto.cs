@@ -101,3 +101,19 @@ public class InstagramChange
     public object? Value { get; set; }
 }
 
+// DTO para el valor cuando field = "messages" en changes
+public class InstagramMessageChangeValue
+{
+    [JsonPropertyName("sender")]
+    public InstagramUser Sender { get; set; } = new();
+
+    [JsonPropertyName("recipient")]
+    public InstagramUser Recipient { get; set; } = new();
+
+    [JsonPropertyName("timestamp")]
+    public string Timestamp { get; set; } = string.Empty; // Puede venir como string
+
+    [JsonPropertyName("message")]
+    public InstagramMessageData? Message { get; set; }
+}
+
