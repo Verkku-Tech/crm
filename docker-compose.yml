@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm_postgres
+    environment:
+      POSTGRES_DB: crmdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm_network
+
+  api:
+    build:
+      context: .
+      dockerfile: CRM.Api/Dockerfile
+    container_name: crm_api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=crmdb;Username=postgres;Password=postgres123
+      - Instagram__AppId=1219600076893853
+      - Instagram__AppSecret=4c7eafa00ded2d3e941943bf97757c16
+      - Instagram__VerifyToken=Tekron
+      - Instagram__PageAccessToken=IGAARVOEVZA7p1BZAFNHdjd3dXRGUzR6ZAEcxSlNDSnRkZAG9lUTF3Tnk2SE1vV0lnNHZAkdHhPLXBNaGF4SmFZAaXJ1U3lVeklYQjJfWWdnS0Uwb1d2cUdiQlVDMzZA4Q0hTTXpHRDMxRFR4M2UzVjhPOThOQ0Q1OG9ZANjN3V3NJbzgtUQZDZD
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crm_network
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: crm_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@crm.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - crm_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  crm_network:
+    driver: bridge
+
