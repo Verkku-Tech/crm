@@ -318,10 +318,15 @@ public class InstagramWebhookController : ControllerBase
             // Fetch Instagram user info
             var userInfo = await _instagramService.GetUserInfo(instagramId);
 
+            // Asegurar que no lanzamos excepción si el instagramId es más corto de 8 caracteres
+            var shortInstagramId = instagramId.Length > 8
+                ? instagramId[..8]
+                : instagramId;
+
             contact = new Contact
             {
                 InstagramId = instagramId,
-                Name = userInfo?.Username ?? $"Instagram User {instagramId[..8]}",
+                Name = userInfo?.Username ?? $"Instagram User {shortInstagramId}",
                 InstagramUsername = userInfo?.Username,
                 CreatedAt = DateTime.UtcNow
             };
